@@ -1,6 +1,6 @@
 import { App } from '@microsoft/teams.apps';
 import { DevtoolsPlugin } from '@microsoft/teams.dev';
-import { docAgent } from './doc-agent';
+import { docAgent } from './doc-agent.js';
 
 const app = new App({
   plugins: [new DevtoolsPlugin()],

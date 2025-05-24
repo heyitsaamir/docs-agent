@@ -82,6 +82,38 @@ const tools: ToolDefinition<any>[] = [
                 }
             }
             return output.join('\n');
+        },
+    },
+    {
+        name: "edit_file",
+        description: "Edit the contents of a given relative file path. Use this when you want to change what's inside a file. If the path does not exist, it will be created.",
+        parameters: {
+            type: 'object',
+            properties: {
+                path: {
+                    type: 'string',
+                    description: 'The relative path of a file in the working directory.',
+                },
+                content: {
+                    type: 'string',
+                    description: 'The new content of the file.',
+                },
+            },
+            required: ['path', 'content'],
+        },
+        execute: async ({ path: incomingPath, content }) => {
+            console.log('Executing edit_file with path: ', incomingPath);
+            const basePath = process.cwd();
+            const baseDirectory = path.join(basePath, 'md');
+            const fullPath = path.join(baseDirectory, incomingPath);
+            // If the directory does not exist, create it
+            const directory = path.dirname(fullPath);
+            if (!fs.existsSync(directory)) {
+                fs.mkdirSync(directory, { recursive: true });
+            }
+            // If the file does not exist, create it
+            fs.writeFileSync(fullPath, content);
+            return 'File updated successfully';
         }
     }
 ]
@@ -94,7 +126,11 @@ class DocAgent {
                 apiKey: process.env.OPENAI_API_KEY,
                 model: 'gpt-4o',
             }),
-            instructions: "You are a helpful assistant that helps users with documentation. You have access to the docs, use those to answer the user's question.",
+            instructions: `You are a helpful assistant that helps users with documentation. 
+RULES:
+1. You have access to the docs via the tools provided. You MUST use those to answer the user's question. 
+3. If you see FileCodeBlock in the docs, the source code that it renders should be in the src prop listed with it (inside the static folder). 
+4. With your final output, please return the source paths that you used to answer the user's question.`,
             messages: this.messages,
         });
 

@@ -3,8 +3,9 @@
   "version": "0.0.0",
   "license": "MIT",
   "private": true,
-  "main": "dist/index",
-  "types": "dist/index",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
   "files": [
     "dist",
     "README.md"
@@ -12,8 +13,8 @@
   "scripts": {
     "clean": "npx rimraf ./dist",
     "build": "npx tsc",
-    "start": "node .",
-    "dev": "npx nodemon -w \"./src/**\" -e ts --exec \"node -r ts-node/register -r dotenv/config ./src/index.ts\""
+    "start": "node dist/index.js",
+    "dev": "npx tsx --env-file=.env --watch ./src/index.ts"
   },
   "dependencies": {
     "@microsoft/teams.ai": "^2.0.0-preview.3",
@@ -23,14 +24,13 @@
     "@microsoft/teams.common": "preview",
     "@microsoft/teams.dev": "preview",
     "@microsoft/teams.graph": "preview",
-    "@microsoft/teams.openai": "^2.0.0-preview.3"
+    "@microsoft/teams.openai": "^2.0.0-preview.3",
+    "@octokit/rest": "^21.1.1",
+    "simple-git": "^3.27.0"
   },
   "devDependencies": {
     "@types/node": "^22.5.4",
-    "dotenv": "^16.4.5",
-    "nodemon": "^3.1.4",
     "rimraf": "^6.0.1",
-    "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   }
 }
