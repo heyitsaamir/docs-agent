@@ -2,15 +2,9 @@ import { ChatPrompt, Message } from "@microsoft/teams.ai";
 import { OpenAIChatModel } from "@microsoft/teams.openai";
 import fs from 'fs';
 import path from 'path';
+import { ToolDefinition } from "./type.js";
 
-type ToolDefinition<T> = {
-    name: string;
-    description: string;
-    parameters: T;
-    execute: (parameters: T) => Promise<string>;
-}
-
-const tools: ToolDefinition<any>[] = [
+const tools: ToolDefinition[] = [
     {
         name: 'read_file',
         description: 'Read the contents of a given relative file path. Use this when you want to see what\'s inside a file. Do not use this with directory names.',
@@ -24,7 +18,7 @@ const tools: ToolDefinition<any>[] = [
             },
             required: ['path'],
         },
-        execute: async ({ path: incomingPath }) => {
+        execute: async ({ path: incomingPath }: { path: string }) => {
             console.log('Executing read_file with path: ', incomingPath);
             const basePath = process.cwd();
             const baseDirectory = path.join(basePath, 'md');
@@ -46,7 +40,7 @@ const tools: ToolDefinition<any>[] = [
             },
             required: [],
         },
-        execute: async ({ path: incomingPath }) => {
+        execute: async ({ path: incomingPath }: { path: string }) => {
             console.log('Executing list_files with path: ', incomingPath);
             // If the path is backward, then throw
             if (incomingPath.includes('..')) {
@@ -101,7 +95,7 @@ const tools: ToolDefinition<any>[] = [
             },
             required: ['path', 'content'],
         },
-        execute: async ({ path: incomingPath, content }) => {
+        execute: async ({ path: incomingPath, content }: { path: string, content: string }) => {
             console.log('Executing edit_file with path: ', incomingPath);
             const basePath = process.cwd();
             const baseDirectory = path.join(basePath, 'md');
@@ -116,11 +110,16 @@ const tools: ToolDefinition<any>[] = [
             return 'File updated successfully';
         }
     }
-]
+];
+
 class DocAgent {
-    messages: Message[] = [];
-    prompt: ChatPrompt;
-    constructor() {
+    private static agents: Map<string, DocAgent> = new Map();
+    private messages: Message[] = [];
+    private prompt: ChatPrompt;
+    private conversationId: string;
+
+    private constructor(conversationId: string) {
+        this.conversationId = conversationId;
         this.prompt = new ChatPrompt({
             model: new OpenAIChatModel({
                 apiKey: process.env.OPENAI_API_KEY,
@@ -133,11 +132,16 @@ RULES:
 4. With your final output, please return the source paths that you used to answer the user's question.`,
             messages: this.messages,
         });
-
         for (const tool of tools) {
             this.prompt.function(tool.name, tool.description, tool.parameters, tool.execute);
         }
+    }
 
+    static getAgent(conversationId: string): DocAgent {
+        if (!this.agents.has(conversationId)) {
+            this.agents.set(conversationId, new DocAgent(conversationId));
+        }
+        return this.agents.get(conversationId)!;
     }
 
     async run(input: string) {
@@ -147,6 +151,6 @@ RULES:
     }
 }
 
-const docAgent = new DocAgent();
-export { docAgent };
+export { DocAgent };
+// Usage: DocAgent.getAgent(conversationId)
 
