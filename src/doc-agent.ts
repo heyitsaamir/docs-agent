@@ -5,7 +5,7 @@ import path from 'path';
 import { GitAgent } from "./git-agent.js";
 import { ToolDefinition } from "./type.js";
 
-const buildTools = (context: { conversationId: string }): ToolDefinition[] => {
+const buildTools = (context: { conversationId: string, inform: (str: string) => Promise<void> }): ToolDefinition[] => {
     return [
         {
             name: 'read_file',
@@ -24,6 +24,7 @@ const buildTools = (context: { conversationId: string }): ToolDefinition[] => {
                 required: ['paths'],
             },
             execute: async (paths: { paths: string[] }) => {
+                await context.inform('Executing read_file with paths: ' + paths.paths.join(', '));
                 const results: { path: string, content: string }[] = [];
                 for (const incomingPath of paths.paths) {
                     console.log('Executing read_file with path: ', incomingPath);
@@ -50,6 +51,7 @@ const buildTools = (context: { conversationId: string }): ToolDefinition[] => {
                 required: ['path'],
             },
             execute: async ({ path: incomingPath }: { path: string }) => {
+                await context.inform('Executing list_files with path: ' + incomingPath);
                 console.log('Executing list_files with path: ', incomingPath);
                 // If the path is backward, then throw
                 if (incomingPath.includes('..')) {
@@ -105,11 +107,11 @@ const buildTools = (context: { conversationId: string }): ToolDefinition[] => {
                 required: ['path', 'content'],
             },
             execute: async function ({ path: incomingPath, content }: { path: string, content: string }) {
+                await context.inform('Executing edit_file with path: ' + incomingPath);
                 console.log('Executing edit_file with path: ', incomingPath);
                 const gitAgent = GitAgent.getAgent(context.conversationId);
-                await gitAgent.applyChanges(context.conversationId, [{ path: incomingPath, content }]);
-                await gitAgent.commitAndPush(context.conversationId, `Update ${incomingPath}`);
-                // }
+                await gitAgent.applyChanges([{ path: incomingPath, content }]);
+                await gitAgent.commitAndPush(`Update ${incomingPath}`);
                 return 'File updated, committed, and pushed successfully';
             }
         },
@@ -126,9 +128,9 @@ const buildTools = (context: { conversationId: string }): ToolDefinition[] => {
                 required: ['title', 'body'],
             },
             execute: async function ({ title, body, base }: { title: string, body: string, base?: string }) {
+                await context.inform('Executing create_pr with title: ' + title + ' and body: ' + body + ' and base: ' + base);
                 const gitAgent = GitAgent.getAgent(context.conversationId);
-                return await gitAgent.createPR(context.conversationId, title, body, base || 'main');
-                return 'No conversation context available for PR creation.';
+                return await gitAgent.createPR(title, body, base || 'main');
             }
         }
     ]
@@ -140,7 +142,7 @@ class DocAgent {
     private prompt: ChatPrompt;
     private conversationId: string;
 
-    private constructor(conversationId: string) {
+    private constructor(conversationId: string, send: (str: string) => Promise<void>) {
         this.conversationId = conversationId;
         this.prompt = new ChatPrompt({
             model: new OpenAIChatModel({
@@ -154,15 +156,15 @@ RULES:
 4. With your final output, please return the source paths that you used to answer the user's question.`,
             messages: this.messages,
         });
-        const tools = buildTools({ conversationId: this.conversationId });
+        const tools = buildTools({ conversationId: this.conversationId, inform: send });
         for (const tool of tools) {
             this.prompt.function(tool.name, tool.description, tool.parameters, tool.execute);
         }
     }
 
-    static getAgent(conversationId: string): DocAgent {
+    static getAgent(conversationId: string, send: (str: string) => Promise<void>): DocAgent {
         if (!this.agents.has(conversationId)) {
-            this.agents.set(conversationId, new DocAgent(conversationId));
+            this.agents.set(conversationId, new DocAgent(conversationId, send));
         }
         return this.agents.get(conversationId)!;
     }

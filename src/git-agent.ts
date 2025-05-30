@@ -24,139 +24,6 @@ function getBranchName(conversationId: string): string {
     return `docs-agent/${conversationId}`;
 }
 
-type CheckoutBranchParams = { repoPath: string; branch: string };
-type ApplyChangesParams = { repoPath: string; changes: { path: string; content: string }[] };
-type CommitAndPushParams = { repoPath: string; branch: string; message: string };
-type CreatePrParams = { branch: string; title: string; body: string; base: string };
-type CleanupParams = { repoPath: string };
-
-const tools: ToolDefinition[] = [
-    {
-        name: 'clone_repo',
-        description: 'Clone the repository to a temporary directory.',
-        parameters: {
-            type: 'object',
-            properties: {},
-            required: [],
-        },
-        execute: async () => {
-            const tempDir = getTempRepoPath(uuidv4());
-            const git = simpleGit();
-            await git.clone(REPO_URL as string, tempDir);
-            return tempDir;
-        }
-    },
-    {
-        name: 'checkout_branch',
-        description: 'Checkout a new branch in the cloned repository.',
-        parameters: {
-            type: 'object',
-            properties: {
-                repoPath: { type: 'string', description: 'Path to the cloned repo.' },
-                branch: { type: 'string', description: 'Branch name to create and checkout.' },
-            },
-            required: ['repoPath', 'branch'],
-        },
-        execute: async ({ repoPath, branch }: CheckoutBranchParams) => {
-            const git = simpleGit(repoPath);
-            await git.checkoutLocalBranch(branch);
-            return `Checked out branch ${branch}`;
-        }
-    },
-    {
-        name: 'apply_changes',
-        description: 'Apply file changes (edits/creates) in the repo.',
-        parameters: {
-            type: 'object',
-            properties: {
-                repoPath: { type: 'string', description: 'Path to the cloned repo.' },
-                changes: {
-                    type: 'array', items: {
-                        type: 'object',
-                        properties: {
-                            path: { type: 'string', description: 'Relative file path.' },
-                            content: { type: 'string', description: 'New file content.' }
-                        },
-                        required: ['path', 'content']
-                    }, description: 'Array of file changes.'
-                }
-            },
-            required: ['repoPath', 'changes'],
-        },
-        execute: async ({ repoPath, changes }: ApplyChangesParams) => {
-            for (const change of changes) {
-                const filePath = path.join(repoPath, change.path);
-                const dir = path.dirname(filePath);
-                if (!fs.existsSync(dir)) {
-                    fs.mkdirSync(dir, { recursive: true });
-                }
-                fs.writeFileSync(filePath, change.content);
-            }
-            return 'Changes applied.';
-        }
-    },
-    {
-        name: 'commit_and_push',
-        description: 'Commit and push changes to remote.',
-        parameters: {
-            type: 'object',
-            properties: {
-                repoPath: { type: 'string', description: 'Path to the cloned repo.' },
-                branch: { type: 'string', description: 'Branch name.' },
-                message: { type: 'string', description: 'Commit message.' },
-            },
-            required: ['repoPath', 'branch', 'message'],
-        },
-        execute: async ({ repoPath, branch, message }: CommitAndPushParams) => {
-            const git = simpleGit(repoPath);
-            await git.add('.');
-            await git.commit(message);
-            await git.push('origin', branch);
-            return 'Committed and pushed changes.';
-        }
-    },
-    {
-        name: 'create_pr',
-        description: 'Create a pull request on GitHub.',
-        parameters: {
-            type: 'object',
-            properties: {
-                branch: { type: 'string', description: 'Branch name.' },
-                title: { type: 'string', description: 'PR title.' },
-                body: { type: 'string', description: 'PR body.' },
-                base: { type: 'string', description: 'Base branch (default: main).' },
-            },
-            required: ['branch', 'title', 'body', 'base'],
-        },
-        execute: async ({ branch, title, body, base }: CreatePrParams) => {
-            const pr = await octokit.pulls.create({
-                owner: GITHUB_OWNER as string,
-                repo: GITHUB_REPO as string,
-                head: branch,
-                base: base || 'main',
-                title,
-                body,
-            });
-            return `PR created: ${pr.data.html_url}`;
-        }
-    },
-    {
-        name: 'cleanup',
-        description: 'Remove the temporary cloned repository directory.',
-        parameters: {
-            type: 'object',
-            properties: {
-                repoPath: { type: 'string', description: 'Path to the cloned repo.' },
-            },
-            required: ['repoPath'],
-        },
-        execute: async ({ repoPath }: CleanupParams) => {
-            fs.rmSync(repoPath, { recursive: true, force: true });
-            return 'Temporary directory removed.';
-        }
-    }
-];
-
 interface GitAgentState {
     tempRepoPath: string;
     branchName: string;
@@ -169,7 +36,6 @@ class GitAgent {
     private conversationId: string;
     private prompt: ChatPrompt;
 
-    // Constructor is now public to allow direct instantiation if needed.
     public constructor(conversationId: string) {
         this.conversationId = conversationId;
         this.prompt = new ChatPrompt({
@@ -180,6 +46,76 @@ class GitAgent {
             instructions: "You are a helpful assistant that manages git operations for documentation changes.",
             messages: [],
         });
+        // Register tools using instance methods, relying on internal state
+        const tools: ToolDefinition[] = [
+            {
+                name: 'clone_repo',
+                description: 'Clone the repository to a temporary directory.',
+                parameters: {
+                    type: 'object',
+                    properties: {},
+                    required: [],
+                },
+                execute: this.cloneRepo.bind(this)
+            },
+            {
+                name: 'apply_changes',
+                description: 'Apply file changes (edits/creates) in the repo.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        changes: {
+                            type: 'array', items: {
+                                type: 'object',
+                                properties: {
+                                    path: { type: 'string', description: 'Relative file path.' },
+                                    content: { type: 'string', description: 'New file content.' }
+                                },
+                                required: ['path', 'content']
+                            }, description: 'Array of file changes.'
+                        }
+                    },
+                    required: ['changes'],
+                },
+                execute: async ({ changes }: { changes: { path: string, content: string }[] }) => this.applyChanges(changes)
+            },
+            {
+                name: 'commit_and_push',
+                description: 'Commit and push changes to remote.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        message: { type: 'string', description: 'Commit message.' },
+                    },
+                    required: ['message'],
+                },
+                execute: async ({ message }: { message: string }) => this.commitAndPush(message)
+            },
+            {
+                name: 'create_pr',
+                description: 'Create a pull request on GitHub.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        title: { type: 'string', description: 'PR title.' },
+                        body: { type: 'string', description: 'PR body.' },
+                        base: { type: 'string', description: 'Base branch (default: main).' },
+                    },
+                    required: ['title', 'body'],
+                },
+                execute: async ({ title, body, base }: { title: string, body: string, base?: string }) => this.createPR(title, body, base || 'main')
+            },
+            {
+                name: 'cleanup',
+                description: 'Remove the temporary cloned repository directory.',
+                parameters: {
+                    type: 'object',
+                    properties: {},
+                    required: [],
+                },
+                execute: this.cleanup.bind(this)
+            }
+        ];
         for (const tool of tools) {
             this.prompt.function(tool.name, tool.description, tool.parameters, tool.execute);
         }
@@ -204,13 +140,11 @@ class GitAgent {
         return result.content;
     }
 
-    // Utility to check if workspace exists for a conversation
     static workspaceExists(conversationId: string): boolean {
         const state = this.state.get(conversationId);
         return !!(state && fs.existsSync(state.tempRepoPath));
     }
 
-    // Ensure the repo is cloned and branch is checked out for this conversation
     async ensureWorkspace(): Promise<GitAgentState> {
         let state = GitAgent.state.get(this.conversationId);
         const tempRepoPath = getTempRepoPath(this.conversationId);
@@ -223,6 +157,13 @@ class GitAgent {
             await git.clone(REPO_URL as string, tempRepoPath);
             const repoGit = simpleGit(tempRepoPath);
             await repoGit.checkoutLocalBranch(branchName);
+            // Try to pull from remote if branch exists
+            try {
+                await repoGit.pull('origin', branchName);
+            } catch (err) {
+                // If the branch doesn't exist on remote, ignore the error
+                console.log(`Remote branch ${branchName} does not exist or could not be pulled. Continuing.`);
+            }
             state = { tempRepoPath, branchName };
             GitAgent.state.set(this.conversationId, state);
         } else {
@@ -232,7 +173,20 @@ class GitAgent {
         return state;
     }
 
-    public async applyChanges(conversationId: string, changes: { path: string, content: string }[]) {
+    // Instance tool methods for tool registration
+    private async cloneRepo() {
+        const tempDir = getTempRepoPath(uuidv4());
+        // If it already exists, just say it's already cloned, and return the tempDir
+        if (fs.existsSync(tempDir)) {
+            console.log(`Repo already exists in ${tempDir}`);
+            return tempDir;
+        }
+        const git = simpleGit();
+        await git.clone(REPO_URL as string, tempDir);
+        return tempDir;
+    }
+
+    public async applyChanges(changes: { path: string, content: string }[]) {
         const state = await this.ensureWorkspace();
         for (const change of changes) {
             const filePath = path.join(state.tempRepoPath, change.path);
@@ -245,7 +199,7 @@ class GitAgent {
         return 'Changes applied.';
     }
 
-    public async commitAndPush(conversationId: string, message: string) {
+    public async commitAndPush(message: string) {
         const state = await this.ensureWorkspace();
         const git = simpleGit(state.tempRepoPath);
         await git.add('.');
@@ -254,7 +208,7 @@ class GitAgent {
         return 'Committed and pushed changes.';
     }
 
-    public async createPR(conversationId: string, title: string, body: string, base: string) {
+    public async createPR(title: string, body: string, base: string) {
         const state = await this.ensureWorkspace();
         const pr = await octokit.pulls.create({
             owner: GITHUB_OWNER as string,
@@ -267,11 +221,11 @@ class GitAgent {
         return `PR created: ${pr.data.html_url}`;
     }
 
-    public async cleanup(conversationId: string) {
-        const state = GitAgent.getState(conversationId);
+    public async cleanup() {
+        const state = GitAgent.getState(this.conversationId);
         if (state && fs.existsSync(state.tempRepoPath)) {
             fs.rmSync(state.tempRepoPath, { recursive: true, force: true });
-            GitAgent.state.delete(conversationId);
+            GitAgent.state.delete(this.conversationId);
             return 'Temporary directory removed.';
         }
         return 'No workspace to clean up.';
@@ -294,11 +248,6 @@ const agentCard: {
             name: 'clone_repo',
             description: 'Clone the repository to a temporary directory.',
             examples: ['Clone the repository to a temporary directory.']
-        },
-        {
-            name: 'checkout_branch',
-            description: 'Checkout a new branch in the cloned repository.',
-            examples: ['Checkout a new branch in the cloned repository.']
         },
         {
             name: 'apply_changes',
