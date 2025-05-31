@@ -155,21 +155,26 @@ class GitAgent {
             fs.mkdirSync(BASE_TMP_DIR, { recursive: true });
             const git = simpleGit();
             await git.clone(REPO_URL as string, tempRepoPath);
-            const repoGit = simpleGit(tempRepoPath);
-            await repoGit.checkoutLocalBranch(branchName);
-            // Try to pull from remote if branch exists
-            try {
-                await repoGit.pull('origin', branchName);
-            } catch (err) {
-                // If the branch doesn't exist on remote, ignore the error
-                console.log(`Remote branch ${branchName} does not exist or could not be pulled. Continuing.`);
-            }
-            state = { tempRepoPath, branchName };
-            GitAgent.state.set(this.conversationId, state);
         } else {
-            console.log(`Repo already exists in ${tempRepoPath}`);
-            state = state ?? { tempRepoPath, branchName };
+            console.debug(`Repo already exists in ${tempRepoPath}`);
         }
+        const repoGit = simpleGit(tempRepoPath);
+        // Try to pull from remote if branch exists
+        try {
+            console.log('Checking out branch:', branchName);
+            await repoGit.checkoutLocalBranch(branchName);
+        } catch (err) {
+            console.debug('Error checking out branch. Continuing...', err);
+        }
+        try {
+            console.log('Pulling branch:', branchName);
+            await repoGit.pull('origin', branchName);
+        } catch (err) {
+            // If the branch doesn't exist on remote, ignore the error
+            console.log(`Remote branch ${branchName} does not exist or could not be pulled. Continuing.`);
+        }
+        state = { tempRepoPath, branchName };
+        GitAgent.state.set(this.conversationId, state);
         return state;
     }
 
@@ -178,7 +183,7 @@ class GitAgent {
         const tempDir = getTempRepoPath(uuidv4());
         // If it already exists, just say it's already cloned, and return the tempDir
         if (fs.existsSync(tempDir)) {
-            console.log(`Repo already exists in ${tempDir}`);
+            console.debug(`Repo already exists in ${tempDir}`);
             return tempDir;
         }
         const git = simpleGit();
@@ -187,6 +192,7 @@ class GitAgent {
     }
 
     public async applyChanges(changes: { path: string, content: string }[]) {
+        console.log('Applying changes:', changes);
         const state = await this.ensureWorkspace();
         for (const change of changes) {
             const filePath = path.join(state.tempRepoPath, change.path);
@@ -200,11 +206,17 @@ class GitAgent {
     }
 
     public async commitAndPush(message: string) {
-        const state = await this.ensureWorkspace();
-        const git = simpleGit(state.tempRepoPath);
-        await git.add('.');
-        await git.commit(message);
-        await git.push('origin', state.branchName);
+        console.log('Committing and pushing changes:', message);
+        try {
+            const state = await this.ensureWorkspace();
+            const git = simpleGit(state.tempRepoPath);
+            await git.add('.');
+            await git.commit(message);
+            await git.push('origin', state.branchName);
+        } catch (err) {
+            console.error('Error committing and pushing changes:', err);
+            throw err;
+        }
         return 'Committed and pushed changes.';
     }
 
@@ -229,6 +241,35 @@ class GitAgent {
             return 'Temporary directory removed.';
         }
         return 'No workspace to clean up.';
+    }
+
+    /**
+     * Returns the local docs path for a given conversation. Ensures the repo is cloned and up-to-date.
+     * If the conversation branch exists, uses it; otherwise, falls back to main branch.
+     * Returns the path to the docs root (assume docs are at the root of the repo).
+     */
+    static async getDocsPath(conversationId: string): Promise<{ path: string, branch: string }> {
+        const tempRepoPath = getTempRepoPath(conversationId);
+        const branchName = getBranchName(conversationId);
+        fs.mkdirSync(BASE_TMP_DIR, { recursive: true });
+        const git = simpleGit();
+        // If repo doesn't exist locally, clone it
+        if (!fs.existsSync(tempRepoPath)) {
+            await git.clone(REPO_URL as string, tempRepoPath);
+        }
+        const repoGit = simpleGit(tempRepoPath);
+        let branch = 'main';
+        try {
+            await repoGit.fetch();
+            await repoGit.checkout(branchName);
+            await repoGit.pull('origin', branchName);
+            branch = branchName;
+        } catch (err) {
+            await repoGit.checkout('main');
+            await repoGit.pull('origin', 'main');
+            branch = 'main';
+        }
+        return { path: tempRepoPath, branch };
     }
 }
 
