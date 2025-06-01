@@ -164,7 +164,7 @@ class GitAgent {
             console.log('Checking out branch:', branchName);
             await repoGit.checkoutLocalBranch(branchName);
         } catch (err) {
-            console.debug('Error checking out branch. Continuing...', err);
+            console.debug('Error checking out branch. Continuing...');
         }
         try {
             console.log('Pulling branch:', branchName);
