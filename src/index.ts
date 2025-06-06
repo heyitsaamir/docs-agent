@@ -9,10 +9,23 @@ const app = new App({
   plugins: [new DevtoolsPlugin()],
 });
 
+const getRootConersationId = (conversationId: string): string => {
+  // pull the conversationId from '19:eSvf4asEtKZAcyD7xQiZPKac1dDaHduVPa98VOu5LaI1@thread.tacv2;messageid=1748996373679'
+  // if messageId exists
+  const parts = conversationId.split(';');
+  if (parts.length > 1) {
+    return parts[0];
+  }
+  // if messageId does not exist, return the conversationId as is
+  return conversationId;
+
+}
+
 if (USE_GIT_ONLY) {
   app.on('message', async ({ send, activity }) => {
     await send({ type: 'typing' });
-    const gitAgent = GitAgent.getAgent(activity.conversation.id);
+    const conversationId = getRootConersationId(activity.conversation.id);
+    const gitAgent = GitAgent.getAgent(conversationId);
     const result = await gitAgent.run(activity.text);
     if (result) {
       await send(result);
@@ -21,7 +34,8 @@ if (USE_GIT_ONLY) {
 } else {
   app.on('message', async ({ send, activity }) => {
     await send({ type: 'typing' });
-    const docAgent = DocAgent.getAgent(activity.conversation.id, async (str) => {
+    const conversationId = getRootConersationId(activity.conversation.id);
+    const docAgent = DocAgent.getAgent(conversationId, async (str) => {
       await send(str)
     });
     const result = await docAgent.run(activity.text);

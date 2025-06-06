@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { simpleGit } from 'simple-git';
 import { v4 as uuidv4 } from 'uuid';
+import { ConversationIdNameService } from './conversationIdNameService.js';
 import { ToolDefinition } from "./type.js";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -17,11 +18,13 @@ const octokit = new Octokit({ auth: GITHUB_TOKEN });
 const BASE_TMP_DIR = '/tmp/docs-agent';
 
 function getTempRepoPath(conversationId: string): string {
-    return path.join(BASE_TMP_DIR, conversationId);
+    const safeName = ConversationIdNameService.getOrCreateName(conversationId);
+    return path.join(BASE_TMP_DIR, safeName);
 }
 
 function getBranchName(conversationId: string): string {
-    return `docs-agent/${conversationId}`;
+    const safeName = ConversationIdNameService.getOrCreateName(conversationId);
+    return `docs-agent/${safeName}`;
 }
 
 interface GitAgentState {
