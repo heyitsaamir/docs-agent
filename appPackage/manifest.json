@@ -43,6 +43,48 @@
       "supportsFiles": false
     }
   ],
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": [
+        {
+          "name": "TeamsAppInstallation.Read.User",
+          "type": "Application"
+        },
+        {
+          "name": "TeamsAppInstallation.Read.Chat",
+          "type": "Application"
+        },
+        {
+          "name": "TeamsAppInstallation.Read.Group",
+          "type": "Application"
+        },
+        {
+          "name": "ChatMember.Read.Chat",
+          "type": "Application"
+        },
+        {
+          "name": "TeamMember.Read.Group",
+          "type": "Application"
+        },
+        {
+          "name": "TeamsActivity.Send.User",
+          "type": "Application"
+        },
+        {
+          "type": "Application",
+          "name": "TeamsActivity.Send.Group"
+        },
+        {
+          "type": "Application",
+          "name": "TeamsActivity.Send.Chat"
+        },
+        {
+          "type": "Application",
+          "name": "ChannelMessage.Read.Group"
+        }
+      ]
+    }
+  },
   "validDomains": [
     "${{BOT_DOMAIN}}",
     "*.botframework.com"

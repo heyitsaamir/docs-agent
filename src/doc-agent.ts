@@ -1,13 +1,12 @@
-import { ChatPrompt, Message } from "@microsoft/teams.ai";
+import { ChatPrompt } from "@microsoft/teams.ai";
 import { OpenAIChatModel } from "@microsoft/teams.openai";
 import fs from 'fs';
 import path from 'path';
+import { ConversationHistoryService } from "./conversationHistoryService.js";
 import { GitAgent } from "./git-agent.js";
 import { ToolDefinition } from "./type.js";
 
 class DocAgent {
-    private static agents: Map<string, DocAgent> = new Map();
-    private messages: Message[] = [];
     private prompt: ChatPrompt;
     private conversationId: string;
     private docsPath?: string;
@@ -31,7 +30,7 @@ class DocAgent {
         return this.docsBranch === 'main';
     }
 
-    private buildTools(send: (str: string) => Promise<void>): ToolDefinition[] {
+    private buildTools(): ToolDefinition[] {
         return [
             {
                 name: 'read_file',
@@ -50,7 +49,8 @@ class DocAgent {
                     required: ['paths'],
                 },
                 execute: async (paths: { paths: string[] }) => {
-                    await send('Executing read_file with paths: ' + paths.paths.join(', '));
+                    // await send('Executing read_file with paths: ' + paths.paths.join(', '));
+                    console.log('Executing read_file with paths: ', paths.paths);
                     const results: { path: string, content: string }[] = [];
                     const docsPath = await this.getDocsPath();
                     for (const incomingPath of paths.paths) {
@@ -76,7 +76,7 @@ class DocAgent {
                     required: ['path'],
                 },
                 execute: async ({ path: incomingPath }: { path: string }) => {
-                    await send('Executing list_files with path: ' + incomingPath);
+                    // await send('Executing list_files with path: ' + incomingPath);
                     console.log('Executing list_files with path: ', incomingPath);
                     // If the path is backward, then throw
                     if (incomingPath.includes('..')) {
@@ -131,7 +131,7 @@ class DocAgent {
                     required: ['path', 'content'],
                 },
                 execute: async ({ path: incomingPath, content }: { path: string, content: string }) => {
-                    await send('Executing edit_file with path: ' + incomingPath);
+                    // await send('Executing edit_file with path: ' + incomingPath);
                     console.log('Executing edit_file with path: ', incomingPath);
                     const gitAgent = GitAgent.getAgent(this.conversationId);
                     await gitAgent.applyChanges([{ path: incomingPath, content }]);
@@ -156,7 +156,8 @@ class DocAgent {
                     required: ['title', 'body'],
                 },
                 execute: async ({ title, body, base }: { title: string, body: string, base?: string }) => {
-                    await send('Executing create_pr with title: ' + title + ' and body: ' + body + ' and base: ' + base);
+                    // await send('Executing create_pr with title: ' + title + ' and body: ' + body + ' and base: ' + base);
+                    console.log('Executing create_pr with title: ', title, 'body: ', body, 'base: ', base);
                     const gitAgent = GitAgent.getAgent(this.conversationId);
                     return await gitAgent.createPR(title, body, base || 'main');
                 }
@@ -164,8 +165,12 @@ class DocAgent {
         ];
     }
 
-    private constructor(conversationId: string, send: (str: string) => Promise<void>) {
+    private constructor(conversationId: string, _send: (str: string) => Promise<void>) {
         this.conversationId = conversationId;
+        // Load conversation history and convert to Message[]
+        const messages = ConversationHistoryService.getHistory(conversationId);
+        console.log('messages', messages);
+
         this.prompt = new ChatPrompt({
             model: new OpenAIChatModel({
                 apiKey: process.env.OPENAI_API_KEY,
@@ -176,27 +181,25 @@ RULES:
 1. You have access to the docs via the tools provided. You MUST use those to answer the user's question. 
 3. If you see FileCodeBlock in the docs, the source code that it renders should be in the src prop listed with it (inside the static folder). 
 4. With your final output, please return the source paths that you used to answer the user's question.`,
-            messages: this.messages,
+            messages,
         });
-        const tools = this.buildTools(send);
+        const tools = this.buildTools();
         for (const tool of tools) {
             this.prompt.function(tool.name, tool.description, tool.parameters, tool.execute);
         }
     }
 
     static getAgent(conversationId: string, send: (str: string) => Promise<void>): DocAgent {
-        if (!this.agents.has(conversationId)) {
-            this.agents.set(conversationId, new DocAgent(conversationId, send));
-        }
-        return this.agents.get(conversationId)!;
+        return new DocAgent(conversationId, send)
     }
 
     async run(input: string) {
-        console.log(this.messages);
         const result = await this.prompt.send(input);
+        const outputMessages = await this.prompt.messages.values();
+        ConversationHistoryService.setHistory(this.conversationId, outputMessages);
+        console.log('output message', outputMessages)
         return result.content;
     }
 }
 
 export { DocAgent };
-

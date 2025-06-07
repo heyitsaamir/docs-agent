@@ -2,3 +2,5 @@ node_modules
 .env
 appPackage/build
 .DS_Store
+conversation-history/
+conversation-map.json
